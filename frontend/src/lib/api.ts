@@ -53,5 +53,7 @@ export async function sendChatMessage(repoUrl: string, question: string): Promis
     body: JSON.stringify({ repo_url: repoUrl, question }),
   });
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  // Backend trả về streaming JSON — đọc toàn bộ text rồi parse
+  const text = await res.text();
+  return JSON.parse(text);
 }

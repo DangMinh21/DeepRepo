@@ -1,12 +1,15 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 import asyncio
+import concurrent.futures
 import json
 from app.models.repo import RepoAnalysisRequest, AnalysisStatus
 from app.services.analysis_service import run_analysis_pipeline, get_analysis, get_repo_id
 from app.agents.qa_agent import answer_question
 from app.tools.github_tools import parse_github_url
 from pydantic import BaseModel
+
+_thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 router = APIRouter()
 
@@ -61,23 +64,33 @@ async def stream_analysis(repo_id: str):
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
-    """Hỏi đáp về repo."""
+    """
+    Hỏi đáp về repo.
+    Chạy QA agent trong thread pool để không block event loop,
+    trả về SSE stream để tránh timeout trên Render free tier.
+    """
     parsed = parse_github_url(request.repo_url)
     if not parsed:
         raise HTTPException(status_code=400, detail="Invalid GitHub URL")
 
-    # Lấy analysis context nếu có
     repo_id = get_repo_id(request.repo_url)
     analysis_context = get_analysis(repo_id)
 
-    answer = answer_question(
-        owner=parsed["owner"],
-        repo_name=parsed["repo_name"],
-        question=request.question,
-        analysis_context=analysis_context
-    )
+    async def stream_answer():
+        loop = asyncio.get_event_loop()
+        # Chạy blocking agent trong thread pool — không block event loop
+        answer = await loop.run_in_executor(
+            _thread_pool,
+            lambda: answer_question(
+                owner=parsed["owner"],
+                repo_name=parsed["repo_name"],
+                question=request.question,
+                analysis_context=analysis_context
+            )
+        )
+        yield json.dumps({"answer": answer}, ensure_ascii=False)
 
-    return {"answer": answer}
+    return StreamingResponse(stream_answer(), media_type="application/json")
 
 
 @router.get("/health")
