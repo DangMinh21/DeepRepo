@@ -1,0 +1,9 @@
+fastapi==0.135.3
+uvicorn==0.44.0
+litellm==1.83.4
+pygithub==2.9.0
+redis==7.4.0
+python-dotenv==1.0.1
+pydantic==2.12.5
+sse-starlette==3.3.4
+httpx==0.28.1
